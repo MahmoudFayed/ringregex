@@ -3,6 +3,8 @@ load "ringregex.ring"
 /*
 * Arabic Text Processing Examples
 * This file demonstrates various Arabic text processing techniques using RingRegex
+  Author: Azzeddine Remmal
+  Version: 1.0
 */
 
 ? "مثال 1: التحقق من صحة النص العربي"
