@@ -3,7 +3,7 @@ load "ringregex.ring"
 /*
     File: test_function_regex.ring
     Description: Examples demonstrating the usage of the RegEx functions
-    Author: Your Name
+    Author: Azzeddine Remmal
     Version: 1.0
     regex_new
     regex_match
