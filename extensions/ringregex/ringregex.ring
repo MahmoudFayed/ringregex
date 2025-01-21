@@ -41,7 +41,7 @@ class RegEx
     */
     func isValid
         if pattern = NULL return false ok
-        return regex_is_valid(pattern)
+        return regex_pattern_info(pattern)[1] = 1
     
     /*
         Function: match
