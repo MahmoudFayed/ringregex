@@ -2,7 +2,7 @@ load "ringregex.ring"
 /*
     File: test_class_regex.ring
     Description: Examples demonstrating the usage of the RegEx class
-    Author: Your Name
+    Author: Azzeddine Remmal
     Version: 1.0
     Class: RegEx
     Method: match(text)
