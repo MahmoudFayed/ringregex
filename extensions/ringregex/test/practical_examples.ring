@@ -3,7 +3,7 @@ load "stdlib.ring"
 /*
     File: practical_examples.ring
     Description: Practical examples using RegEx class
-    Author: Your Name
+    Author: Azzeddine Remmal
     Version: 1.0
 */
 
