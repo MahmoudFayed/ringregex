@@ -12,12 +12,21 @@ ok
     Author: Azzeddine Remmal
     Version: 1.0
 */
+
+# Regex flags constants
+REGEX_CASELESS = 1
+REGEX_MULTILINE = 2
+REGEX_DOTALL = 4
+REGEX_EXTENDED = 8
+
+
 class RegEx
 
     # Pattern object returned by regex_new()
     pattern
     # Flags used when creating the pattern
     flags
+    lastError = ""
     
     /*
         Function: init
@@ -29,9 +38,16 @@ class RegEx
     */
     func init cPattern, nFlags
         if NOT isString(cPattern)
-            raise("Error: Pattern must be a string")
+            lastError = "Pattern must be a string"
+            raise("Error: " + lastError)
         ok
+        if isNull(nFlags) nFlags = 0 ok
+        flags = nFlags
         pattern = regex_new(cPattern, nFlags)
+        if NOT isValid()
+            lastError = getError()
+            raise("Error: Invalid regex pattern - " + lastError)
+        ok
         return self
     
     /*
@@ -60,6 +76,24 @@ class RegEx
             return false
         ok
         return regex_match(pattern, cText)
+
+    /*
+        Function: matchFirst
+        Description: Gets the first match in the text
+        Parameters:
+            cText [String] - The text to search in
+        Returns: String of the first match or empty string if no match
+    */
+    func matchFirst cText
+        if NOT isValid() 
+            raise("Error: Invalid regex pattern - " + getError())
+            return ""
+        ok
+        matches = getAllMatches(cText)
+        if len(matches) > 0 and len(matches[1]) > 0
+            return matches[1][1]  # Return the first full match
+        ok
+        return ""
     
     /*
         Function: matchAt
@@ -89,8 +123,21 @@ class RegEx
         if len(cSubText) = 0 return false ok
         
         # Match on the substring
-        return match(cSubText)
-    
+        pos_list = regex_match_positions(pattern, cSubText)
+        if islist(pos_list) and len(pos_list) > 0 and islist(pos_list[1]) and len(pos_list[1]) >= 2
+            # check that there is a match at the start of the substring
+            if pos_list[1][1] = 1
+                # Match found at the specified position
+                return true
+            else
+                # Match found, but not at the specified position
+                return false
+            ok
+        else
+            # No match found at the specified position
+            return false
+        ok
+
     /*
         Function: getMatchPositions
         Description: Gets the positions of all matches
@@ -263,4 +310,7 @@ class RegEx
     */
     func getError
         return regex_get_error(pattern)
+    
+    func getLastError
+        return lastError
     
