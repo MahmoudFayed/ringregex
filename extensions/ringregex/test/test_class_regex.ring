@@ -139,11 +139,22 @@ done
 regex = new RegEx("\d+", 0)
 text = "The number 123 and 456"
 
+matches = regex.findAll(text)
+? "Numbers found: " + len(matches)
+for match in matches
+    ? "Number: " + match[1]  # First element is the full match
+next
+
+pos_list = regex.getMatchPositions(text)
+for i = 1 to len(pos_list)
+    ? "Match " + i + ": Start at " + pos_list[i][1] + ", End at " + pos_list[i][2]
+next
+
 # Test matching at different positions
 ? "Text: " + text
 ? "Match at position 1: " + regex.matchAt(text, 1)    # Should be false
-? "Match at position 11: " + regex.matchAt(text, 11)  # Should be true (123)
-? "Match at position 19: " + regex.matchAt(text, 19)  # Should be true (456)
+? "Match at position 11: " + regex.matchAt(text, 12)  # Should be true (123)
+? "Match at position 19: " + regex.matchAt(text, 20)  # Should be true (456)
 ? "Match at position 15: " + regex.matchAt(text, 15)  # Should be false
 
 # Test with invalid position

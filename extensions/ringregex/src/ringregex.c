@@ -11,7 +11,7 @@ typedef struct {
     char *error_message;
 } RegexPattern;
 
-void ring_regex_pattern_delete(void *ptr)
+void ring_regex_pattern_delete(void *pRingState, void *ptr)
 {
     RegexPattern *pattern = (RegexPattern *)ptr;
     if (pattern->is_valid) {
@@ -50,6 +50,9 @@ RING_FUNC(ring_regex_new)
     if (RING_API_PARACOUNT > 1 && RING_API_ISNUMBER(2)) {
         int flags = (int)RING_API_GETNUMBER(2);
         if (flags & 1) options |= PCRE2_CASELESS;  // Case insensitive
+        if (flags & 2) options |= PCRE2_MULTILINE;     // Multiline mode
+        if (flags & 4) options |= PCRE2_DOTALL;        // Dot matches newline
+        if (flags & 8) options |= PCRE2_EXTENDED;      // Extended syntax
     }
     
     // Add UTF-8 support by default
@@ -57,6 +60,11 @@ RING_FUNC(ring_regex_new)
     
     // Allocate memory for the pattern structure
     pattern = (RegexPattern *)malloc(sizeof(RegexPattern));
+    if (!pattern) {
+        RING_API_ERROR("Memory allocation failed");
+        return;
+    }
+    
     pattern->is_valid = 0;
     pattern->error_message = NULL;
     
@@ -72,13 +80,17 @@ RING_FUNC(ring_regex_new)
 
     if (pattern->regex != NULL) {
         pattern->is_valid = 1;
-        RING_API_RETCPOINTER(pattern, "RegexPattern");
+        // Enable JIT compilation for better performance
+        pcre2_jit_compile(pattern->regex, PCRE2_JIT_COMPLETE);
+        // JIT compilation failure is not fatal, just less optimal
     } else {
         // Get the error message
         pcre2_get_error_message(error_code, error_buffer, sizeof(error_buffer));
         pattern->error_message = strdup((char *)error_buffer);
-        RING_API_RETCPOINTER(pattern, "RegexPattern");
     }
+    
+    // Register cleanup function
+    RING_API_RETMANAGEDCPOINTER(pattern, "RegexPattern", ring_regex_pattern_delete);
 }
 
 // Function to get last error message
@@ -97,6 +109,10 @@ RING_FUNC(ring_regex_get_error)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
     
     if (pattern->error_message) {
         RING_API_RETSTRING(pattern->error_message);
@@ -124,6 +140,10 @@ RING_FUNC(ring_regex_match)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
     text = RING_API_GETSTRING(2);
     
     if (!pattern->is_valid) {
@@ -153,7 +173,8 @@ RING_FUNC(ring_regex_match_positions)
     const char *text;
     pcre2_match_data *match_data;
     PCRE2_SIZE *ovector;
-    int rc, i;
+    int rc, start_offset = 0;
+    size_t text_len;
     List *pList;
     
     if (RING_API_PARACOUNT != 2) {
@@ -167,33 +188,49 @@ RING_FUNC(ring_regex_match_positions)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+    
     text = RING_API_GETSTRING(2);
+    text_len = strlen(text);
     
     if (!pattern->is_valid) {
         RING_API_ERROR("Invalid regex pattern");
         return;
     }
     
-    match_data = pcre2_match_data_create_from_pattern(pattern->regex, NULL);
-    rc = pcre2_match(
-        pattern->regex,
-        (PCRE2_SPTR)text,
-        strlen(text),
-        0,
-        0,
-        match_data,
-        NULL
-    );
-    
     pList = ring_list_new(0);
+    match_data = pcre2_match_data_create_from_pattern(pattern->regex, NULL);
     
-    if (rc >= 0) {
+    while (start_offset < text_len) {
+        rc = pcre2_match(
+            pattern->regex,
+            (PCRE2_SPTR)text,
+            text_len,
+            start_offset,
+            0,
+            match_data,
+            NULL
+        );
+        
+        if (rc < 0) break;
+        
         ovector = pcre2_get_ovector_pointer(match_data);
-        for (i = 0; i < rc + 1; i++) {  // Include the full match
-            List *pSubList = ring_list_new(0);
+        
+        // Add all capturing groups for this match
+        for (int i = 0; i < rc; i++) {
+            List *pSubList = ring_list_newlist(pList);
             ring_list_adddouble(pSubList, (double)(ovector[2*i] + 1));  // Convert to 1-based index
             ring_list_adddouble(pSubList, (double)(ovector[2*i+1] + 1));  // Convert to 1-based index
-            ring_list_addpointer(pList, pSubList);
+        }
+        
+        // Move past this match
+        start_offset = ovector[1];
+        if (ovector[0] == ovector[1]) {
+            if (start_offset >= text_len) break;
+            start_offset++;
         }
     }
     
@@ -223,6 +260,11 @@ RING_FUNC(ring_regex_match_all)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+    
     text = RING_API_GETSTRING(2);
     
     if (!pattern->is_valid) {
@@ -248,7 +290,12 @@ RING_FUNC(ring_regex_match_all)
         for (i = 0; i < rc; i++) {
             int length = ovector[2*i+1] - ovector[2*i];
             substring = (char *)malloc(length + 1);
-            strncpy(substring, text + ovector[2*i], length);
+            if (!substring) {
+                pcre2_match_data_free(match_data);
+                RING_API_ERROR("Memory allocation failed");
+                return;
+            }
+            memcpy(substring, text + ovector[2*i], length);
             substring[length] = '\0';
             ring_list_addstring2(pList, substring, length);
             free(substring);
@@ -280,6 +327,11 @@ RING_FUNC(ring_regex_replace)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+    
     text = RING_API_GETSTRING(2);
     replacement = RING_API_GETSTRING(3);
     
@@ -299,17 +351,17 @@ RING_FUNC(ring_regex_replace)
         RING_API_ERROR("Memory allocation failed");
         return;
     }
-    
-    rc = pcre2_substitute(
-        pattern->regex,
-        (PCRE2_SPTR)text,
-        strlen(text),
-        0,
-        PCRE2_SUBSTITUTE_GLOBAL,
-        match_data,
-        NULL,
-        (PCRE2_SPTR)replacement,
-        strlen(replacement),
+        
+        rc = pcre2_substitute(
+            pattern->regex,
+            (PCRE2_SPTR)text,
+            strlen(text),
+            0,
+            PCRE2_SUBSTITUTE_GLOBAL,
+            match_data,
+            NULL,
+            (PCRE2_SPTR)replacement,
+            strlen(replacement),
         (PCRE2_UCHAR *)result,
         &outlength
     );
@@ -348,6 +400,11 @@ RING_FUNC(ring_regex_split)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+    
     text = RING_API_GETSTRING(2);
     text_len = strlen(text);
     
@@ -378,7 +435,12 @@ RING_FUNC(ring_regex_split)
         if (ovector[0] > last_end) {
             int length = ovector[0] - last_end;
             substring = (char *)malloc(length + 1);
-            strncpy(substring, text + last_end, length);
+            if (!substring) {
+                pcre2_match_data_free(match_data);
+                RING_API_ERROR("Memory allocation failed");
+                return;
+            }
+            memcpy(substring, text + last_end, length);
             substring[length] = '\0';
             ring_list_addstring2(pList, substring, length);
             free(substring);
@@ -396,7 +458,12 @@ RING_FUNC(ring_regex_split)
     if (last_end < text_len) {
         int length = text_len - last_end;
         substring = (char *)malloc(length + 1);
-        strncpy(substring, text + last_end, length);
+        if (!substring) {
+            pcre2_match_data_free(match_data);
+            RING_API_ERROR("Memory allocation failed");
+            return;
+        }
+        memcpy(substring, text + last_end, length);
         substring[length] = '\0';
         ring_list_addstring2(pList, substring, length);
         free(substring);
@@ -462,6 +529,11 @@ RING_FUNC(ring_regex_pattern_info)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+
     pList = ring_list_new(0);
     ring_list_adddouble(pList, pattern->is_valid);
     
@@ -502,6 +574,11 @@ RING_FUNC(ring_regex_find_all)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+    
     text = RING_API_GETSTRING(2);
     text_len = strlen(text);
     
@@ -533,7 +610,12 @@ RING_FUNC(ring_regex_find_all)
         for (int i = 0; i < rc; i++) {
             int length = ovector[2*i+1] - ovector[2*i];
             substring = (char *)malloc(length + 1);
-            strncpy(substring, text + ovector[2*i], length);
+            if (!substring) {
+                pcre2_match_data_free(match_data);
+                RING_API_ERROR("Memory allocation failed");
+                return;
+            }
+            memcpy(substring, text + ovector[2*i], length);
             substring[length] = '\0';
             ring_list_addstring(pMatchList, substring);
             free(substring);
@@ -572,6 +654,11 @@ RING_FUNC(ring_regex_replace_with_refs)
     }
     
     pattern = (RegexPattern *)RING_API_GETCPOINTER(1, "RegexPattern");
+    if (!pattern) {
+        RING_API_ERROR("Invalid regex pattern pointer");
+        return;
+    }
+    
     text = RING_API_GETSTRING(2);
     replacement = RING_API_GETSTRING(3);
     options = (int)RING_API_GETNUMBER(4);
