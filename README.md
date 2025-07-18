@@ -210,7 +210,21 @@ result = regex.replaceWithRefs("hello", "$2", 0)  # $2 doesn't exist
 - Unicode patterns should use `\x{HHHH}` format instead of `\uHHHH`
 - The extension automatically enables UTF-8 support
 - Memory is managed automatically
-
+  
+## fix: enhancements with safety improvements and new features
+- Fix critical memory management issues with proper cleanup handlers
+- Fix matchAt() position-based matching logic
+- Fix match_positions() implementation
+- Add comprehensive null pointer validation
+- Add support for PCRE2 multiline, dotall, and extended syntax flags
+- Introduce new REGEX_* constants for flag configuration
+- Add matchFirst() method for retrieving first match as string
+- Enable PCRE2 JIT compilation for improved performance
+- Enhance error handling with more descriptive messages
+- Replace unsafe strncpy with memcpy for string operations
+- Add getLastError() method for better error diagnostics
+- Update test cases to reflect position-based indexing fixes
+  
 ## License
 
 This extension is released under the MIT License. See the LICENSE file for details.
